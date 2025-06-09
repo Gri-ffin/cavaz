@@ -74,14 +74,13 @@ const AppState = struct {
     height: i32,
     c: i32,
     rest: i32,
-    virt: i32,
     autoband: bool,
     sum: i32,
     hi: i16,
     q: i32,
     val: u32,
-    debug: i32,
     w: sys.winsize,
+    debug: bool,
     color: [*c]const u8,
     col: i32,
     temp: f64,
@@ -94,24 +93,26 @@ const M = 4096;
 const MAX_BANDS = 200;
 
 var old_action: posix.Sigaction = undefined;
+const stdout = std.io.getStdOut().writer();
 
 fn cleanup() void {
     std.debug.print("\x1b[0m\n", .{});
-    _ = os.system("setfont /usr/share/consolefonts/Lat2-Fixed16.psf.gz ");
-    _ = os.system("setterm -cursor on");
-    _ = os.system("clear");
+    stdout.print("\x1b[?25h", .{}) catch {}; // ANSI code for "show cursor"
+    stdout.print("\x1b[2J\x1b[H", .{}) catch {}; // Clear console
     std.debug.print("CTRL-C pressed -- goodbye\n", .{});
 }
 
 fn sigint_handler(sig: c_int) callconv(.C) void {
     _ = sig;
     cleanup();
-    posix.sigaction(posix.SIG.INT, &old_action, null);
-    posix.kill(0, posix.SIG.INT);
+    _ = posix.sigaction(posix.SIG.INT, &old_action, null);
+    _ = posix.kill(0, posix.SIG.INT) catch {
+        std.debug.print("error trying to kill process;", .{});
+    };
 }
 
 pub fn main() !void {
-    var app_state = AppState{ .audio_buffers = undefined, .audio_state = undefined, .buffer = undefined, .bands = 0, .sleep = 0, .h = 0, .i = 0, .n = 0, .o = 0, .size = 0, .dir = 0, .err = 0, .xb = 0, .yb = 0, .bw = 0, .format = 0, .rate = 0, .width = 0, .height = 0, .c = 0, .rest = 0, .virt = 0, .autoband = true, .sum = 0, .hi = 0, .q = 0, .val = 44100, .debug = 0, .w = undefined, .color = null, .col = 37, .temp = 0, .device = "hw:1,0" };
+    var app_state = AppState{ .audio_buffers = undefined, .audio_state = undefined, .buffer = undefined, .bands = 20, .sleep = 0, .h = 0, .i = 0, .n = 0, .o = 0, .size = 0, .dir = 0, .err = 0, .xb = 0, .yb = 0, .bw = 0, .format = 0, .rate = 0, .width = 0, .height = 0, .c = 0, .rest = 0, .autoband = true, .sum = 0, .hi = 0, .q = 0, .val = 44100, .w = undefined, .debug = false, .color = null, .col = 37, .temp = 0, .device = "hw:1,0" };
 
     var args = std.process.ArgIterator.init();
     _ = args.next();
@@ -159,9 +160,48 @@ pub fn main() !void {
                 std.debug.print("color {s} not supported\n", .{app_state.color});
                 return error.InvalidArgs;
             }
+        } else if (std.mem.eql(u8, arg, "-h")) {
+            std.debug.print("\nUsage : ./cavaz [options]\n\nOptions:\n\t-b 1..(console columns/2-1) or 200, number of bars in the spectrum (default 20 + fills up the console), program wil auto adjust to maxsize if input is to high)\n\n\t-d 'alsa device', name of alsa capture device (default 'hw:1,1')\n\n\t-c color\tsuported colors: red, green, yellow, magenta, cyan, white, blue (default: cyan)\n\n\"", .{});
         } else {
             std.debug.print("Usage: program [-b bands] [-d device] [-c color] [-B]\nSupported colors: red, green, yellow, blue, magenta, cyan, white\n", .{});
             return error.InvalidArgs;
         }
     }
+
+    // Handle CTRL-C
+    var action = posix.Sigaction{
+        .handler = .{ .handler = sigint_handler },
+        .mask = posix.empty_sigset,
+        .flags = 0,
+    };
+    posix.sigaction(posix.SIG.INT, &action, &old_action);
+
+    // Get the h*w of term
+    const res = sys.ioctl(posix.STDOUT_FILENO, sys.TIOCGWINSZ, &app_state.w);
+    if (res != 0) {
+        return error.IoctlFailed;
+    }
+    const term_width: c_int = @intCast(app_state.w.ws_col);
+    // limit the amount of bars the user can set
+    if (app_state.bands > @divTrunc(term_width, 2) - 1) {
+        app_state.bands = @divTrunc(term_width, 2) - 1;
+    }
+    app_state.height = @intCast(app_state.w.ws_row - 1);
+    app_state.width = @intCast(app_state.w.ws_col - app_state.bands - 1);
+    // var matrix: [app_state.width][app_state.height]bool = undefined;
+    app_state.bw = @divTrunc(app_state.width, app_state.bands);
+
+    //if no bands are selected it tries to pad the default 20 if there is extra room
+    if (app_state.autoband == true) {
+        app_state.bands = app_state.bands + @divTrunc((app_state.w.ws_col - (app_state.bw * app_state.bands + app_state.bands - 1)), (app_state.bw + 1));
+    }
+
+    // if there is extra room, try to center
+    app_state.rest = (((app_state.w.ws_col) - (app_state.bw * app_state.bands + app_state.bands - 1)));
+    if (app_state.rest < 0) app_state.rest = 0;
+
+    // reset the console
+    std.debug.print("\x1b[0m\n", .{});
+    stdout.print("\x1b[2J\x1b[H", .{}) catch {}; // Clear console
+    std.debug.print("\x1b[{d}m", .{app_state.col}); // set the color
 }
