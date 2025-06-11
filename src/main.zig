@@ -53,7 +53,7 @@ const AppState = struct {
     audio_state: AudioState,
 
     // Misc
-    buffer: [*c]i8,
+    buffer: []u8,
     bands: i32,
     sleep: i32,
     h: f32,
@@ -62,14 +62,14 @@ const AppState = struct {
     i: i32,
     n: i32,
     o: i32,
-    size: i32,
-    dir: i32,
+    size: usize,
+    dir: c_int,
     err: i32,
     xb: i32,
     yb: i32,
     bw: i32,
-    format: i32,
-    rate: i32,
+    format: c_uint,
+    rate: c_uint,
     width: i32,
     height: i32,
     c: i32,
@@ -78,7 +78,7 @@ const AppState = struct {
     sum: i32,
     hi: i16,
     q: i32,
-    val: u32,
+    val: c_uint,
     w: sys.winsize,
     debug: bool,
     color: [*c]const u8,
@@ -204,4 +204,55 @@ pub fn main() !void {
     std.debug.print("\x1b[0m\n", .{});
     stdout.print("\x1b[2J\x1b[H", .{}) catch {}; // Clear console
     std.debug.print("\x1b[{d}m", .{app_state.col}); // set the color
+
+    const audio_stream_err = alsa.snd_pcm_open(&app_state.audio_state.handle, app_state.device, alsa.SND_PCM_STREAM_CAPTURE, 0);
+    if (audio_stream_err < 0) {
+        std.debug.print("Error opening audio stream {s}\n", .{alsa.snd_strerror(audio_stream_err)});
+    } else {
+        std.debug.print("Audio stream opened successfully\n", .{});
+    }
+
+    // Allocate memory for the hardware params structure
+    const malloc_err = alsa.snd_pcm_hw_params_malloc(&app_state.audio_state.params);
+    if (malloc_err < 0) {
+        std.debug.print("Error allocating hw params: {s}\n", .{alsa.snd_strerror(malloc_err)});
+        return error.AlsaError;
+    }
+
+    _ = alsa.snd_pcm_hw_params_any(app_state.audio_state.handle, app_state.audio_state.params);
+    _ = alsa.snd_pcm_hw_params_set_access(app_state.audio_state.handle, app_state.audio_state.params, alsa.SND_PCM_ACCESS_RW_INTERLEAVED);
+    _ = alsa.snd_pcm_hw_params_set_format(app_state.audio_state.handle, app_state.audio_state.params, alsa.SND_PCM_FORMAT_S16_LE);
+    _ = alsa.snd_pcm_hw_params_set_channels(app_state.audio_state.handle, app_state.audio_state.params, 2);
+    app_state.val = 44100;
+    _ = alsa.snd_pcm_hw_params_set_rate_near(app_state.audio_state.handle, app_state.audio_state.params, &app_state.val, &app_state.dir);
+    app_state.audio_state.frames = 32;
+    _ = alsa.snd_pcm_hw_params_set_period_size_near(app_state.audio_state.handle, app_state.audio_state.params, &app_state.audio_state.frames, &app_state.dir);
+
+    const hw_err = alsa.snd_pcm_hw_params(app_state.audio_state.handle, app_state.audio_state.params);
+    if (hw_err < 0) {
+        std.debug.print("Unable to set hw params: {d}\n", .{hw_err});
+        std.process.exit(1);
+    }
+
+    _ = alsa.snd_pcm_hw_params_get_period_size(app_state.audio_state.params, &app_state.audio_state.frames, &app_state.dir);
+    _ = alsa.snd_pcm_hw_params_get_period_time(app_state.audio_state.params, &app_state.val, &app_state.dir);
+    _ = alsa.snd_pcm_hw_params_get_format(app_state.audio_state.params, @ptrCast(&app_state.val));
+
+    if (app_state.val < 6) {
+        app_state.format = 16;
+    } else if (app_state.val > 5 and app_state.val < 10) {
+        app_state.format = 24;
+    } else if (app_state.val > 9) {
+        app_state.format = 32;
+    }
+
+    app_state.size = app_state.audio_state.frames * (@as(usize, app_state.format) / 8) * 2;
+    app_state.buffer = try std.heap.page_allocator.alloc(u8, app_state.size);
+
+    std.debug.print("Detected format: {d}\n", .{app_state.format});
+    _ = alsa.snd_pcm_hw_params_get_rate(app_state.audio_state.params, &app_state.rate, &app_state.dir);
+    std.debug.print("Detected rate: {d}\n", .{app_state.rate});
+
+    // Free allocated memory for the hardware params
+    alsa.snd_pcm_hw_params_free(app_state.audio_state.params);
 }
