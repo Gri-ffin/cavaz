@@ -27,13 +27,13 @@ You need:
 Build with:
 
 ```sh
-zig build-exe main.zig -lc
+zig build-exe main.zig -lc -lasound
 ```
 
 ## How to run
 
 ```sh
-./cavaz [-b bands] [-d device] [-c color]
+./main [-b bands] [-d device] [-c color]
 ```
 
 Options:
@@ -45,7 +45,7 @@ Options:
 Example:
 
 ```sh
-./cavaz -b 100 -d hw:0,0 -c cyan
+./main -b 100 -d hw:0,0 -c cyan
 ```
 
 ## Notes
