@@ -40,7 +40,7 @@ const AudioState = struct {
     params: ?*alsa.snd_pcm_hw_params_t,
     val: c_uint,
     frames: alsa.snd_pcm_uframes_t,
-    p: ?*fftw.fftw_plan,
+    p: fftw.fftw_plan,
     start: time.timespec,
     stop: time.timespec,
     accum: f64,
@@ -255,4 +255,21 @@ pub fn main() !void {
 
     // Free allocated memory for the hardware params
     alsa.snd_pcm_hw_params_free(app_state.audio_state.params);
+
+    // Calculate Cut of frequncies
+    for (0..@as(usize, @intCast(app_state.bands + 1))) |i| {
+        const ratio = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(app_state.bands));
+        const exponent = -2.0 * ratio * 2.0;
+        app_state.audio_buffers.fc[i] = 8000.0 * math.pow(f32, 10.0, exponent);
+        app_state.audio_buffers.fr[i] = app_state.audio_buffers.fc[i] / @as(f32, @floatFromInt(app_state.rate));
+        app_state.audio_buffers.lcf[i] = @as(c_int, @intFromFloat(app_state.audio_buffers.fr[i] * (M / 2 + 1)));
+        if (i != 0) {
+            app_state.audio_buffers.hcf[i - 1] = app_state.audio_buffers.lcf[i];
+            std.debug.print("{}: {} -> {} ({} -> {})\n", .{ i, app_state.audio_buffers.fc[i - 1], app_state.audio_buffers.fc[i], app_state.audio_buffers.lcf[i - 1], app_state.audio_buffers.hcf[i - 1] });
+        }
+    }
+
+    app_state.audio_state.p = fftw.fftw_plan_dft_r2c_1d(M, &app_state.audio_buffers.in_buffer, @ptrCast(&app_state.audio_buffers.out_buffer[0][0]), fftw.FFTW_MEASURE);
+
+    // TODO: MAIN LOOP
 }
