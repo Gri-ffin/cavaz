@@ -253,9 +253,6 @@ pub fn main() !void {
     _ = alsa.snd_pcm_hw_params_get_rate(app_state.audio_state.params, &app_state.rate, &app_state.dir);
     std.debug.print("Detected rate: {d}\n", .{app_state.rate});
 
-    // Free allocated memory for the hardware params
-    alsa.snd_pcm_hw_params_free(app_state.audio_state.params);
-
     // Calculate Cut of frequncies
     for (0..@as(usize, @intCast(app_state.bands + 1))) |i| {
         const ratio = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(app_state.bands));
@@ -272,4 +269,9 @@ pub fn main() !void {
     app_state.audio_state.p = fftw.fftw_plan_dft_r2c_1d(M, &app_state.audio_buffers.in_buffer, @ptrCast(&app_state.audio_buffers.out_buffer[0][0]), fftw.FFTW_MEASURE);
 
     // TODO: MAIN LOOP
+
+
+
+    // Free allocated memory for the hardware params
+    alsa.snd_pcm_hw_params_free(app_state.audio_state.params);
 }
